@@ -2,6 +2,33 @@
 
 Canonical reference for changes, improvements, and bugfixes for cap.
 
+## Next
+
+* feat (oidc): add WithVerifier ([PR #141](https://github.com/hashicorp/cap/pull/141))
+* feat (ldap): add an option to enable sAMAccountname logins when upndomain is set ([PR #146](https://github.com/hashicorp/cap/pull/146))
+* feat (saml): enhancing signature validation in SAML Response ([PR #144](https://github.com/hashicorp/cap/pull/144))
+* chore: update dependencies in pkgs: cap, cap/ldap, cap/saml ([PR
+  #147](https://github.com/hashicorp/cap/pull/147), [PR
+  #148](https://github.com/hashicorp/cap/pull/148), [PR
+  #149](https://github.com/hashicorp/cap/pull/149))
+* chore: update CODEOWNERS ([PR
+  #142](https://github.com/hashicorp/cap/pull/142),[PR
+  #143](https://github.com/hashicorp/cap/pull/143) )
+
+## 0.7.0
+
+* Add ability to the SAML test provider to create signed SAML responses by
+  @hcjulz ([PR: 135](https://github.com/hashicorp/cap/pull/135))
+* Bump golang.org/x/net from 0.22.0 to 0.23.0 by @dependabot ([PR #136](https://github.com/hashicorp/cap/pull/136))
+* feat (config): add support for a http.RoundTripper by @jimlambrt ([PR #137](https://github.com/hashicorp/cap/pull/137))
+* chore: update deps by @jimlambrt ([PR #138](https://github.com/hashicorp/cap/pull/138))
+
+## 0.6.0
+
+* Add case insensitive user attribute keys configs for LDAP by @jasonodonnell in https://github.com/hashicorp/cap/pull/132
+* chore (oidc, jwt, ldap): update deps by @jimlambrt in **https**://github.com/hashicorp/cap/pull/133
+* Add empty anonymous group search configs by @jasonodonnell in https://github.com/hashicorp/cap/pull/134
+
 ## 0.5.0
 
 ### Improvements

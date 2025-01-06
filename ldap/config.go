@@ -87,6 +87,10 @@ type ClientConfig struct {
 	// for the initial connection test).
 	AnonymousGroupSearch bool `json:"anonymous_group_search"`
 
+	// AllowEmptyAnonymousGroupSearches: if true it removes the userDN from
+	// unauthenticated group searches (optional).
+	AllowEmptyAnonymousGroupSearch bool `json:"allow_empty_anonymous_group_search"`
+
 	// GroupDN is the distinguished name to use as base when searching for group
 	// membership (eg: ou=Groups,dc=example,dc=org)
 	GroupDN string `json:"groupdn"`
@@ -200,6 +204,11 @@ type ClientConfig struct {
 	// AD (unicodePwd) will always be excluded.
 	ExcludedUserAttributes []string
 
+	// LowerUserAttributeKeys optionally specifies that the authenticating user's
+	// DN and attributes be included in AuthResult use lowercase key names rather
+	// than the default camel case.
+	LowerUserAttributeKeys bool
+
 	// IncludeUserGroups optionally specifies that the authenticating user's
 	// group membership be included an authentication AuthResult.
 	IncludeUserGroups bool
@@ -221,6 +230,9 @@ type ClientConfig struct {
 	// the pre 1.1.1 Vault behavior.
 	// see: https://www.vaultproject.io/docs/upgrading/upgrade-to-1.1.1
 	DeprecatedVaultPre111GroupCNBehavior *bool `json:"use_pre111_group_cn_behavior"`
+
+	// EnableSamaccountnameLogin enables login with sAMAccountName in addition to UserPrincipalName when upndomain is set.
+	EnableSamaccountnameLogin bool `json:"enable_samaccountname_login"`
 }
 
 func (c *ClientConfig) clone() (*ClientConfig, error) {

@@ -619,7 +619,7 @@ func TestProvider_Exchange(t *testing.T) {
 		tp.SetExpectedAuthCode(code)
 		gotTk, err := p.Exchange(ctx, validRequest, validRequest.State(), "bad-code")
 		require.Error(err)
-		assert.Truef(strings.Contains(err.Error(), "401 Unauthorized"), "wanted strings.Contains \"%s\" but got \"%s\"", "401 Unauthorized", err)
+		assert.Truef(strings.Contains(err.Error(), `unable to exchange auth code with provider: oauth2: "invalid_grant" "unexpected auth code"`), "wanted strings.Contains \"%s\" but got \"%s\"", "401 Unauthorized", err)
 		assert.Empty(gotTk)
 	})
 	t.Run("omit-id-token", func(t *testing.T) {
@@ -713,6 +713,31 @@ func TestHTTPClient(t *testing.T) {
 		c, err := p.HTTPClient()
 		require.NoError(t, err)
 		assert.Equal(t, c.Transport, p.client.Transport)
+	})
+	t.Run("check-transport-with-round-tripper", func(t *testing.T) {
+		testRt := newTestRoundTripper(t)
+		p := &Provider{
+			config: &Config{
+				RoundTripper: testRt,
+			},
+		}
+		c, err := p.HTTPClient()
+		require.NoError(t, err)
+		assert.Equal(t, c.Transport, p.client.Transport)
+	})
+	t.Run("err-both-ca-and-round-trippe", func(t *testing.T) {
+		_, testCaPem := TestGenerateCA(t, []string{"localhost"})
+
+		p := &Provider{
+			config: &Config{
+				ProviderCA:   testCaPem,
+				RoundTripper: newTestRoundTripper(t),
+			},
+		}
+		_, err := p.HTTPClient()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParameter)
+		assert.ErrorContains(t, err, "you cannot specify config for both a ProviderCA and RoundTripper")
 	})
 }
 

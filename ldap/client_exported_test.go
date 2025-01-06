@@ -47,6 +47,15 @@ func TestClient_Authenticate(t *testing.T) {
 			testdirectory.WithDefaults(t, &testdirectory.Defaults{UPNDomain: "example.com"}),
 			testdirectory.WithMembersOf(t, "admin"))...,
 	)
+	// Set up a duplicated user to test the case where the search returns multiple users
+	users = append(
+		users,
+		testdirectory.NewUsers(
+			t,
+			[]string{"mallory", "mallory"},
+			testdirectory.WithDefaults(t, &testdirectory.Defaults{UPNDomain: "example.com"}),
+		)...,
+	)
 	// add some attributes that we always want to filter out of an AuthResult,
 	// so if we ever start seeing tests fail because of them; we know that we've
 	// messed up the default filtering
@@ -59,6 +68,7 @@ func TestClient_Authenticate(t *testing.T) {
 	td.SetUsers(users...)
 	td.SetGroups(groups...)
 	td.SetTokenGroups(tokenGroups)
+
 	tests := []struct {
 		name               string
 		username           string
@@ -183,6 +193,49 @@ func TestClient_Authenticate(t *testing.T) {
 			wantUserDN: "cn=alice,ou=people,dc=example,dc=org",
 		},
 		{
+			name:     "success-with-user-attributes-lower-case-keys",
+			username: "alice",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                   []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:           []string{td.Cert()},
+				DiscoverDN:             true,
+				UserDN:                 testdirectory.DefaultUserDN,
+				GroupDN:                testdirectory.DefaultGroupDN,
+				ExcludedUserAttributes: []string{"password", "memberof"},
+				IncludeUserAttributes:  true,
+				LowerUserAttributeKeys: true,
+			},
+			opts: []ldap.Option{ldap.WithUserAttributes()},
+			wantUserAttributes: map[string][]string{
+				"email":       {"alice@example.com"},
+				"name":        {"alice"},
+				"tokengroups": {"\x01\x00\x00\x00\x00\x00\x00\x01"},
+			},
+			wantUserDN: "cn=alice,ou=people,dc=example,dc=org",
+		},
+		{
+			name:     "success-with-user-attributes-lower-case-keys-opt",
+			username: "alice",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                   []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:           []string{td.Cert()},
+				DiscoverDN:             true,
+				UserDN:                 testdirectory.DefaultUserDN,
+				GroupDN:                testdirectory.DefaultGroupDN,
+				ExcludedUserAttributes: []string{"password", "memberof"},
+				IncludeUserAttributes:  true,
+			},
+			opts: []ldap.Option{ldap.WithUserAttributes(), ldap.WithLowerUserAttributeKeys()},
+			wantUserAttributes: map[string][]string{
+				"email":       {"alice@example.com"},
+				"name":        {"alice"},
+				"tokengroups": {"\x01\x00\x00\x00\x00\x00\x00\x01"},
+			},
+			wantUserDN: "cn=alice,ou=people,dc=example,dc=org",
+		},
+		{
 			name:     "success-include-user-groups",
 			username: "alice",
 			password: "password",
@@ -295,6 +348,72 @@ func TestClient_Authenticate(t *testing.T) {
 			wantGroups: []string{groups[0].DN},
 		},
 		{
+			name:     "success-with-anon-bind-groups-empty-userdn",
+			username: "alice",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                           []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:                   []string{td.Cert()},
+				DiscoverDN:                     true,
+				UserDN:                         testdirectory.DefaultUserDN,
+				GroupDN:                        testdirectory.DefaultGroupDN,
+				UseTokenGroups:                 true,
+				AnonymousGroupSearch:           true,
+				AllowEmptyAnonymousGroupSearch: true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "success-with-anon-bind-groups-empty-userdn-opt",
+			username: "alice",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                 []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:         []string{td.Cert()},
+				DiscoverDN:           true,
+				UserDN:               testdirectory.DefaultUserDN,
+				GroupDN:              testdirectory.DefaultGroupDN,
+				UseTokenGroups:       true,
+				AnonymousGroupSearch: true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups(), ldap.WithEmptyAnonymousGroupSearch()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "success-with-anon-bind-upn-domain-empty-userdn",
+			username: "eve",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                           []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:                   []string{td.Cert()},
+				DiscoverDN:                     true,
+				UserDN:                         testdirectory.DefaultUserDN,
+				GroupDN:                        testdirectory.DefaultGroupDN,
+				UPNDomain:                      "example.com",
+				AnonymousGroupSearch:           true,
+				AllowEmptyAnonymousGroupSearch: true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "success-with-anon-bind-upn-domain-empty-userdn-opt",
+			username: "eve",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                 []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:         []string{td.Cert()},
+				DiscoverDN:           true,
+				UserDN:               testdirectory.DefaultUserDN,
+				GroupDN:              testdirectory.DefaultGroupDN,
+				UPNDomain:            "example.com",
+				AnonymousGroupSearch: true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups(), ldap.WithEmptyAnonymousGroupSearch()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
 			name:     "success-with-binddn",
 			username: "alice",
 			password: "password",
@@ -348,6 +467,73 @@ func TestClient_Authenticate(t *testing.T) {
 			},
 			opts:       []ldap.Option{ldap.WithGroups()},
 			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "success-with-anon-bind-upn-domain-samaccountname",
+			username: "eve",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                      []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:              []string{td.Cert()},
+				DiscoverDN:                true,
+				UserDN:                    testdirectory.DefaultUserDN,
+				GroupDN:                   testdirectory.DefaultGroupDN,
+				UPNDomain:                 "example.com",
+				EnableSamaccountnameLogin: true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "success-with-anon-bind-upn-domain-empty-userdn-samaccountname",
+			username: "eve",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                           []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:                   []string{td.Cert()},
+				DiscoverDN:                     true,
+				UserDN:                         testdirectory.DefaultUserDN,
+				GroupDN:                        testdirectory.DefaultGroupDN,
+				UPNDomain:                      "example.com",
+				AnonymousGroupSearch:           true,
+				AllowEmptyAnonymousGroupSearch: true,
+				EnableSamaccountnameLogin:      true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "success-with-anon-bind-upn-domain-empty-userdn-opt-samaccountname",
+			username: "eve",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:                      []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:              []string{td.Cert()},
+				DiscoverDN:                true,
+				UserDN:                    testdirectory.DefaultUserDN,
+				GroupDN:                   testdirectory.DefaultGroupDN,
+				UPNDomain:                 "example.com",
+				AnonymousGroupSearch:      true,
+				EnableSamaccountnameLogin: true,
+			},
+			opts:       []ldap.Option{ldap.WithGroups(), ldap.WithEmptyAnonymousGroupSearch()},
+			wantGroups: []string{groups[0].DN},
+		},
+		{
+			name:     "failed-with-anon-bind-upn-domain-multiple-users-returned",
+			username: "mallory",
+			password: "password",
+			clientConfig: &ldap.ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				DiscoverDN:   true,
+				UserDN:       testdirectory.DefaultUserDN,
+				GroupDN:      testdirectory.DefaultGroupDN,
+				UPNDomain:    "example.com",
+			},
+			opts:            []ldap.Option{ldap.WithGroups()},
+			wantErr:         true,
+			wantErrContains: "LDAP search for binddn 0 or not unique",
 		},
 	}
 	for _, tc := range tests {

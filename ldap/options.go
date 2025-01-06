@@ -8,15 +8,17 @@ package ldap
 type Option func(interface{})
 
 type configOptions struct {
-	withURLs           []string
-	withInsecureTLS    bool
-	withTLSMinVersion  string
-	withTLSMaxVersion  string
-	withCertificates   []string
-	withClientTLSCert  string
-	withClientTLSKey   string
-	withGroups         bool
-	withUserAttributes bool
+	withURLs                      []string
+	withInsecureTLS               bool
+	withTLSMinVersion             string
+	withTLSMaxVersion             string
+	withCertificates              []string
+	withClientTLSCert             string
+	withClientTLSKey              string
+	withGroups                    bool
+	withUserAttributes            bool
+	withLowerUserAttributeKeys    bool
+	withEmptyAnonymousGroupSearch bool
 }
 
 func configDefaults() configOptions {
@@ -71,6 +73,28 @@ func WithUserAttributes() Option {
 		switch v := o.(type) {
 		case *configOptions:
 			v.withUserAttributes = true
+		}
+	}
+}
+
+// WithLowerUserAttributeKeys returns a User Attribute map where the keys
+// are all cast to lower case. This is necessary for some clients, such as Vault,
+// where user configured user attribute key names have always been stored lower case.
+func WithLowerUserAttributeKeys() Option {
+	return func(o interface{}) {
+		switch v := o.(type) {
+		case *configOptions:
+			v.withLowerUserAttributeKeys = true
+		}
+	}
+}
+
+// WithEmptyAnonymousGroupSearch removes userDN from anonymous group searches.
+func WithEmptyAnonymousGroupSearch() Option {
+	return func(o interface{}) {
+		switch v := o.(type) {
+		case *configOptions:
+			v.withEmptyAnonymousGroupSearch = true
 		}
 	}
 }

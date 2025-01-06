@@ -433,27 +433,337 @@ func TestClient_connect(t *testing.T) {
 	// this test won't run if there's already a service listening on port 389,
 	// but on most systems and in CI it will run and it allows us to test
 	// connecting to a URL without a port
-	t.Run("389", func(t *testing.T) {
+	t.Run("3389", func(t *testing.T) {
 		assert, require := assert.New(t), require.New(t)
 		testCtx := context.Background()
 		logger := hclog.New(&hclog.LoggerOptions{
 			Name:  "test-logger",
 			Level: hclog.Error,
 		})
-		if ln, err := net.Listen("tcp", ":"+"389"); err == nil {
+		if ln, err := net.Listen("tcp", ":"+"3389"); err == nil {
 			ln.Close()
-			_ = testdirectory.Start(t, testdirectory.WithNoTLS(t), testdirectory.WithLogger(t, logger), testdirectory.WithPort(t, 389))
+			_ = testdirectory.Start(t, testdirectory.WithNoTLS(t), testdirectory.WithLogger(t, logger), testdirectory.WithPort(t, 3389))
 			c, err := NewClient(testCtx, &ClientConfig{
-				URLs: []string{"ldap://127.0.0.1"},
+				URLs: []string{"ldap://127.0.0.1:3389"},
 			})
 			require.NoError(err)
 			err = c.connect(testCtx)
 			defer func() { c.Close(testCtx) }()
 			assert.NoError(err)
 		} else {
-			t.Logf("warning: failed to listen on port 389, err=%s", err)
+			t.Logf("warning: failed to listen on port 3389, err=%s", err)
 		}
 	})
+}
+
+func TestClient_getUserBindDN(t *testing.T) {
+	t.Parallel()
+	testCtx := context.Background()
+	logger := hclog.New(&hclog.LoggerOptions{
+		Name:  "test-logger",
+		Level: hclog.Error,
+	})
+	td := testdirectory.Start(nil,
+		testdirectory.WithDefaults(nil, &testdirectory.Defaults{AllowAnonymousBind: true}),
+		testdirectory.WithLogger(t, logger),
+	)
+	users := testdirectory.NewUsers(t, []string{"alice", "bob"})
+	users = append(
+		users,
+		testdirectory.NewUsers(
+			t,
+			[]string{"eve"},
+			testdirectory.WithDefaults(t, &testdirectory.Defaults{UPNDomain: "example.com"}))...,
+	)
+	// Set up a duplicated user to test the case where the search returns multiple users
+	users = append(
+		users,
+		testdirectory.NewUsers(
+			t,
+			[]string{"mallory", "mallory"},
+		)...,
+	)
+	td.SetUsers(users...)
+
+	cases := map[string]struct {
+		conf     *ClientConfig
+		username string
+
+		want            string
+		wantErr         bool
+		wantErrIs       error
+		wantErrContains string
+	}{
+		"fail: missing username": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+			},
+			username: "",
+
+			wantErr:         true,
+			wantErrIs:       ErrInvalidParameter,
+			wantErrContains: "missing username",
+		},
+		"fail: missing all of discoverdn, binddn, bindpass, upndomain, userdn": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+			},
+			username: "alice",
+
+			wantErr:         true,
+			wantErrIs:       ErrInvalidParameter,
+			wantErrContains: "cannot derive UserBindDN based on config (see combination of: discoverdn, binddn, bindpass, upndomain, userdn)",
+		},
+		"fail: search fails to find user": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				DiscoverDN:   true,
+			},
+			username: "nonexistent",
+
+			wantErr:         true,
+			wantErrContains: "LDAP search for binddn failed",
+		},
+		"fail: search returns multiple users": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				DiscoverDN:   true,
+			},
+			username: "mallory",
+
+			wantErr:         true,
+			wantErrContains: "LDAP search for binddn 0 or not unique",
+		},
+		"fail: invalid search filter": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				DiscoverDN:   true,
+				UserFilter:   "({{.BadFilter}}={{.Username}})",
+			},
+			username: "alice",
+
+			wantErr:         true,
+			wantErrContains: "search failed due to template parsing error",
+		},
+		"success: discoverdn": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				DiscoverDN:   true,
+			},
+			username: "alice",
+
+			want: "cn=alice,ou=people,dc=example,dc=org",
+		},
+		"success: binddn and bindpass": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				BindDN:       "cn=bob,ou=people,dc=example,dc=org",
+				BindPassword: "password",
+			},
+			username: "alice",
+
+			want: "cn=alice,ou=people,dc=example,dc=org",
+		},
+		"success: upndomain": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				UPNDomain:    "example.com",
+			},
+			username: "eve",
+
+			want: "eve@example.com",
+		},
+		"success: userdn": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				UserDN:       testdirectory.DefaultUserDN,
+			},
+			username: "alice",
+
+			want: "cn=alice,ou=people,dc=example,dc=org",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			assert, require := assert.New(t), require.New(t)
+			c, err := NewClient(testCtx, tc.conf)
+			require.NoError(err)
+			err = c.connect(testCtx)
+			require.NoError(err)
+			defer func() { c.Close(testCtx) }()
+			got, err := c.getUserBindDN(tc.username)
+			if tc.wantErr {
+				require.Error(err)
+				if tc.wantErrIs != nil {
+					assert.ErrorIs(err, tc.wantErrIs)
+				}
+				if tc.wantErrContains != "" {
+					assert.Contains(err.Error(), tc.wantErrContains)
+				}
+				return
+			}
+			require.NoError(err)
+			assert.Equal(tc.want, got)
+		})
+	}
+}
+
+func TestClient_getUserDN(t *testing.T) {
+	t.Parallel()
+	testCtx := context.Background()
+	logger := hclog.New(&hclog.LoggerOptions{
+		Name:  "test-logger",
+		Level: hclog.Error,
+	})
+	td := testdirectory.Start(nil,
+		testdirectory.WithDefaults(nil, &testdirectory.Defaults{AllowAnonymousBind: true}),
+		testdirectory.WithLogger(t, logger),
+	)
+	users := testdirectory.NewUsers(t, []string{"alice", "bob"})
+	users = append(
+		users,
+		testdirectory.NewUsers(
+			t,
+			[]string{"eve"},
+			testdirectory.WithDefaults(t, &testdirectory.Defaults{UPNDomain: "example.com"}))...,
+	)
+	// Set up a duplicated user to test the case where the search returns multiple users
+	users = append(
+		users,
+		testdirectory.NewUsers(
+			t,
+			[]string{"mallory", "mallory"},
+			testdirectory.WithDefaults(t, &testdirectory.Defaults{UPNDomain: "example.com"}),
+		)...,
+	)
+	td.SetUsers(users...)
+
+	tests := map[string]struct {
+		conf     *ClientConfig
+		bindDN   string
+		username string
+
+		want            string
+		wantErr         bool
+		wantErrIs       error
+		wantErrContains string
+	}{
+		"fail: missing bind dn": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+			},
+			bindDN:   "",
+			username: "alice",
+
+			wantErr:         true,
+			wantErrIs:       ErrInvalidParameter,
+			wantErrContains: "missing bind dn",
+		},
+		"fail: missing username": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+			},
+			bindDN:   fmt.Sprintf("%s=%s,%s", testdirectory.DefaultUserAttr, "bob", testdirectory.DefaultUserDN),
+			username: "",
+
+			wantErr:         true,
+			wantErrIs:       ErrInvalidParameter,
+			wantErrContains: "missing username",
+		},
+		"fail: upn domain search fails to find user": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				UPNDomain:    "example.com",
+			},
+			bindDN:   "userPrincipalName=nonexistent@example.com,ou=people,dc=example,dc=org",
+			username: "nonexistent",
+
+			wantErr:         true,
+			wantErrContains: "LDAP search failed for detecting user",
+		},
+		"fail: upn domain search returns multiple users": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				UPNDomain:    "example.com",
+			},
+			bindDN:   "userPrincipalName=mallory@example.com,ou=people,dc=example,dc=org",
+			username: "mallory",
+
+			wantErr:         true,
+			wantErrContains: "LDAP search for user 0 or not unique",
+		},
+		"success: no upn domain": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+			},
+			bindDN:   "cn=alice,ou=people,dc=example,dc=org",
+			username: "alice",
+
+			want: "cn=alice,ou=people,dc=example,dc=org",
+		},
+		"success: upn domain with samaccountname": {
+			conf: &ClientConfig{
+				URLs:                      []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates:              []string{td.Cert()},
+				UPNDomain:                 "example.com",
+				EnableSamaccountnameLogin: true,
+			},
+			bindDN:   "userPrincipalName=eve@example.com,ou=people,dc=example,dc=org",
+			username: "eve",
+
+			want: "userPrincipalName=eve@example.com,ou=people,dc=example,dc=org",
+		},
+		"success: upn domain without samaccountname": {
+			conf: &ClientConfig{
+				URLs:         []string{fmt.Sprintf("ldaps://127.0.0.1:%d", td.Port())},
+				Certificates: []string{td.Cert()},
+				UPNDomain:    "example.com",
+			},
+			bindDN:   "userPrincipalName=eve@example.com,ou=people,dc=example,dc=org",
+			username: "eve",
+
+			want: "userPrincipalName=eve@example.com,ou=people,dc=example,dc=org",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert, require := assert.New(t), require.New(t)
+			c, err := NewClient(testCtx, tc.conf)
+			require.NoError(err)
+			err = c.connect(testCtx)
+			require.NoError(err)
+			defer func() { c.Close(testCtx) }()
+			got, err := c.getUserDN(tc.bindDN, tc.username)
+			if tc.wantErr {
+				require.Error(err)
+				if tc.wantErrIs != nil {
+					assert.ErrorIs(err, tc.wantErrIs)
+				}
+				if tc.wantErrContains != "" {
+					assert.Contains(err.Error(), tc.wantErrContains)
+				}
+				return
+			}
+			require.NoError(err)
+			assert.Equal(tc.want, got)
+		})
+	}
 }
 
 func Test_sidBytesToString(t *testing.T) {

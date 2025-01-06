@@ -588,7 +588,7 @@ func (p *Provider) convertError(e error) error {
 	switch {
 	case strings.Contains(e.Error(), "id token issued by a different provider"):
 		return fmt.Errorf("%s: %w", e.Error(), ErrInvalidIssuer)
-	case strings.Contains(e.Error(), "signed with unsupported algorithm"):
+	case strings.Contains(e.Error(), "signed with unsupported algorithm"), strings.Contains(e.Error(), "unexpected signature algorithm"):
 		return fmt.Errorf("%s: %w", e.Error(), ErrUnsupportedAlg)
 	case strings.Contains(e.Error(), "before the nbf (not before) time"):
 		return fmt.Errorf("%s: %w", e.Error(), ErrInvalidNotBefore)
@@ -635,17 +635,22 @@ func (p *Provider) HTTPClient() (*http.Client, error) {
 	// to the same host.  On the downside, this transport can leak file
 	// descriptors over time, so we'll be sure to call
 	// client.CloseIdleConnections() in the Provider.Done() to stave that off.
-	tr := cleanhttp.DefaultPooledTransport()
+	var tr http.RoundTripper
 
-	if p.config.ProviderCA != "" {
+	switch {
+	case p.config.RoundTripper != nil && p.config.ProviderCA != "":
+		return nil, fmt.Errorf("%s: you cannot specify config for both a ProviderCA and RoundTripper: %w", op, ErrInvalidParameter)
+	case p.config.ProviderCA != "":
 		certPool := x509.NewCertPool()
 		if ok := certPool.AppendCertsFromPEM([]byte(p.config.ProviderCA)); !ok {
 			return nil, fmt.Errorf("%s: %w", op, ErrInvalidCACert)
 		}
-
-		tr.TLSClientConfig = &tls.Config{
+		tr = cleanhttp.DefaultPooledTransport()
+		tr.(*http.Transport).TLSClientConfig = &tls.Config{
 			RootCAs: certPool,
 		}
+	case p.config.RoundTripper != nil:
+		tr = p.config.RoundTripper
 	}
 
 	c := &http.Client{
